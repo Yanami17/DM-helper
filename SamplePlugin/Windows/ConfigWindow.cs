@@ -7,21 +7,30 @@ namespace SamplePlugin.Windows;
 
 public class ConfigWindow : Window, IDisposable
 {
+
+    private string newMonsterName = string.Empty;
+    private int newMonsterHP = 10;
+    private int newMonsterDC = 10;
+
+    private readonly Plugin plugin;
     private readonly Configuration configuration;
 
     // We give this window a constant ID using ###.
     // This allows for labels to be dynamic, like "{FPS Counter}fps###XYZ counter window",
     // and the window ID will always be "###XYZ counter window" for ImGui
-    public ConfigWindow(Plugin plugin) : base("A Wonderful Configuration Window###With a constant ID")
+    public ConfigWindow(Plugin plugin)
+        : base("DM Configs")
     {
-        Flags = ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar |
-                ImGuiWindowFlags.NoScrollWithMouse;
+        this.plugin = plugin;
+        this.configuration = plugin.Configuration;
 
-        Size = new Vector2(232, 90);
+        Flags = ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse |
+                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
+
+        Size = new Vector2(300, 250); // Slightly bigger now
         SizeCondition = ImGuiCond.Always;
-
-        configuration = plugin.Configuration;
     }
+
 
     public void Dispose() { }
 
@@ -54,6 +63,31 @@ public class ConfigWindow : Window, IDisposable
         {
             configuration.IsConfigWindowMovable = movable;
             configuration.Save();
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Add Monster");
+
+        ImGui.InputText("Name", ref newMonsterName, 100);
+        ImGui.InputInt("HP", ref newMonsterHP);
+        ImGui.InputInt("DC", ref newMonsterDC);
+
+        if (ImGui.Button("Add Monster"))
+        {
+            if (!string.IsNullOrWhiteSpace(newMonsterName))
+            {
+                plugin.Monsters.Add(new Monster
+                {
+                    Name = newMonsterName,
+                    MaxHP = newMonsterHP,
+                    CurrentHP = newMonsterHP,
+                    DC = newMonsterDC
+                });
+
+                newMonsterName = string.Empty;
+                newMonsterHP = 10;
+                newMonsterDC = 10;
+            }
         }
     }
 }

@@ -96,104 +96,144 @@ public class MainWindow : Window, IDisposable
 
         ImGui.Spacing();
 
-        //using (var child = ImRaii.Child("SomeChildWithAScrollbar", Vector2.Zero, true))
-        //{
-        //    if (!child.Success)
-        //        return;
+        // =============================
+        // PARTY DISPLAY + CHAT ROLLS
+        // =============================
 
-            // =============================
-            // PARTY DISPLAY + CHAT ROLLS
-            // =============================
+        ImGuiHelpers.ScaledDummy(15.0f);
+        ImGui.Separator();
+        ImGui.Text("Current Party");
 
-            ImGuiHelpers.ScaledDummy(15.0f);
-            ImGui.Separator();
-            ImGui.Text("Current Party");
+        var partyList = Plugin.PartyList;
 
-            var partyList = Plugin.PartyList;
+        if (partyList == null || partyList.Length == 0)
+        {
+            ImGui.Text("Not currently in a party.");
+            return;
+        }
 
-            if (partyList == null || partyList.Length == 0)
-            {
-                ImGui.Text("Not currently in a party.");
-                return;
-            }
+        using (var partyChild = ImRaii.Child("PartyContainer", new Vector2(0, 200f), true))
+        {
+        if (!partyChild.Success)
+            return;
 
-            using (var partyChild = ImRaii.Child("PartyContainer", new Vector2(0, 200f), true))
-            {
-                if (!partyChild.Success)
-                    return;
+        if (ImGui.BeginTable("PartyTable", 4,
+            ImGuiTableFlags.RowBg |
+            ImGuiTableFlags.Borders |
+            ImGuiTableFlags.SizingStretchProp))
+        {
+            ImGui.TableSetupColumn("#", ImGuiTableColumnFlags.WidthFixed, 25f);
+            ImGui.TableSetupColumn("Name");
+            ImGui.TableSetupColumn("Job / Level", ImGuiTableColumnFlags.WidthFixed, 110f);
+            ImGui.TableSetupColumn("Last Roll", ImGuiTableColumnFlags.WidthFixed, 70f);
+            ImGui.TableHeadersRow();
 
-                if (ImGui.BeginTable("PartyTable", 4,
-                    ImGuiTableFlags.RowBg |
-                    ImGuiTableFlags.Borders |
-                    ImGuiTableFlags.SizingStretchProp))
+                for (int i = 0; i < partyList.Length; i++)
                 {
-                    ImGui.TableSetupColumn("#", ImGuiTableColumnFlags.WidthFixed, 25f);
-                    ImGui.TableSetupColumn("Name");
-                    ImGui.TableSetupColumn("Job / Level", ImGuiTableColumnFlags.WidthFixed, 110f);
-                    ImGui.TableSetupColumn("Last Roll", ImGuiTableColumnFlags.WidthFixed, 70f);
-                    ImGui.TableHeadersRow();
+                    var member = partyList[i];
+                    if (member == null)
+                        continue;
 
-                    for (int i = 0; i < partyList.Length; i++)
+                    ImGui.TableNextRow();
+
+                    bool isLocal =
+                        Plugin.ObjectTable.LocalPlayer != null &&
+                        member.EntityId == Plugin.ObjectTable.LocalPlayer.EntityId;
+
+                    // Index
+                    ImGui.TableNextColumn();
+                    ImGui.Text($"{i + 1}");
+
+                    // Name
+                    ImGui.TableNextColumn();
+                    if (isLocal)
                     {
-                        var member = partyList[i];
-                        if (member == null)
-                            continue;
-
-                        ImGui.TableNextRow();
-
-                        bool isLocal =
-                            Plugin.ObjectTable.LocalPlayer != null &&
-                            member.EntityId == Plugin.ObjectTable.LocalPlayer.EntityId;
-
-                        // Index
-                        ImGui.TableNextColumn();
-                        ImGui.Text($"{i + 1}");
-
-                        // Name
-                        ImGui.TableNextColumn();
-                        if (isLocal)
-                        {
-                            using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(0.3f, 1f, 0.3f, 1f)))
-                                ImGui.Text(member.Name.TextValue);
-                        }
-                        else
-                        {
+                        using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(0.3f, 1f, 0.3f, 1f)))
                             ImGui.Text(member.Name.TextValue);
-                        }
-
-                        // Job/Level
-                        ImGui.TableNextColumn();
-                        ImGui.Text($"{member.ClassJob.Value.Abbreviation} {member.Level}");
-
-                        // Last Roll
-                        ImGui.TableNextColumn();
-
-                        if (lastRolls.TryGetValue(member.EntityId, out var roll))
-                        {
-                            if (roll == 20)
-                            {
-                                using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(0.2f, 1f, 0.2f, 1f)))
-                                    ImGui.Text(roll.ToString());
-                            }
-                            else if (roll == 1)
-                            {
-                                using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(1f, 0.2f, 0.2f, 1f)))
-                                    ImGui.Text(roll.ToString());
-                            }
-                            else
-                            {
-                                ImGui.Text(roll.ToString());
-                            }
-                        }
-                        else
-                        {
-                            ImGui.Text("-");
-                        }
+                    }
+                    else
+                    {
+                        ImGui.Text(member.Name.TextValue);
                     }
 
-                    ImGui.EndTable();
+                    // Job/Level
+                    ImGui.TableNextColumn();
+                    ImGui.Text($"{member.ClassJob.Value.Abbreviation} {member.Level}");
+
+                    // Last Roll
+                    ImGui.TableNextColumn();
+
+                    if (lastRolls.TryGetValue(member.EntityId, out var roll))
+                    {
+                        if (roll == 20)
+                        {
+                            using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(0.2f, 1f, 0.2f, 1f)))
+                                ImGui.Text(roll.ToString());
+                        }
+                        else if (roll == 1)
+                        {
+                            using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(1f, 0.2f, 0.2f, 1f)))
+                                ImGui.Text(roll.ToString());
+                        }
+                        else
+                        {
+                            ImGui.Text(roll.ToString());
+                        }
+                    }
+                    else
+                    {
+                        ImGui.Text("-");
+                    }
+                }
+                ImGui.EndTable();
                 }
             }
-        //}
+
+        // =============================
+        // MONSTER DISPLAY
+        // =============================
+
+        ImGui.Separator();
+        ImGui.Text("Monsters");
+
+        for (int i = 0; i < plugin.Monsters.Count; i++)
+        {
+            var monster = plugin.Monsters[i];
+
+            ImGui.PushID(i);
+
+            ImGui.Text($"{monster.Name}");
+            ImGui.SameLine();
+            ImGui.Text($"HP: {monster.CurrentHP}/{monster.MaxHP}");
+            ImGui.SameLine();
+            ImGui.Text($"DC: {monster.DC}");
+
+            // Damage Button
+            if (ImGui.Button("-5 HP"))
+            {
+                monster.CurrentHP = Math.Max(0, monster.CurrentHP - 5);
+            }
+
+            ImGui.SameLine();
+
+            // Heal Button
+            if (ImGui.Button("+5 HP"))
+            {
+                monster.CurrentHP = Math.Min(monster.MaxHP, monster.CurrentHP + 5);
+            }
+
+            ImGui.SameLine();
+
+            // Delete Button
+            if (ImGui.Button("Delete"))
+            {
+                plugin.Monsters.RemoveAt(i);
+                ImGui.PopID();
+                break;
+            }
+
+            ImGui.Separator();
+            ImGui.PopID();
+        }
     }
 }

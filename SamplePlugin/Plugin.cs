@@ -1,11 +1,12 @@
 using Dalamud.Game.Command;
+using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
-using System.IO;
-using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
 using SamplePlugin.Windows;
 using System;
+using System.Collections.Generic;
+using System.IO;
 
 namespace SamplePlugin;
 
@@ -22,7 +23,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IObjectTable ObjectTable { get; private set; } = null!;
     [PluginService] internal static IChatGui ChatGui { get; private set; } = null!;
 
-
+    public List<Monster> Monsters { get; } = new();
 
     private const string CommandName = "/pmycommand";
 
