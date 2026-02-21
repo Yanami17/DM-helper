@@ -7,87 +7,131 @@ namespace SamplePlugin.Windows;
 
 public class ConfigWindow : Window, IDisposable
 {
-
-    private string newMonsterName = string.Empty;
-    private int newMonsterHP = 10;
-    private int newMonsterDC = 10;
-
     private readonly Plugin plugin;
     private readonly Configuration configuration;
 
-    // We give this window a constant ID using ###.
-    // This allows for labels to be dynamic, like "{FPS Counter}fps###XYZ counter window",
-    // and the window ID will always be "###XYZ counter window" for ImGui
     public ConfigWindow(Plugin plugin)
         : base("DM Configs")
     {
         this.plugin = plugin;
         this.configuration = plugin.Configuration;
 
-        Flags = ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse |
-                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
+        Flags = ImGuiWindowFlags.NoCollapse;
 
-        Size = new Vector2(300, 250); // Slightly bigger now
-        SizeCondition = ImGuiCond.Always;
+        Size = new Vector2(380, 500);
+        SizeCondition = ImGuiCond.FirstUseEver;
     }
 
-
-    public void Dispose() { }
-
-    public override void PreDraw()
+    public void Dispose()
     {
-        // Flags must be added or removed before Draw() is being called, or they won't apply
-        if (configuration.IsConfigWindowMovable)
-        {
-            Flags &= ~ImGuiWindowFlags.NoMove;
-        }
-        else
-        {
-            Flags |= ImGuiWindowFlags.NoMove;
-        }
     }
 
     public override void Draw()
     {
-        // Can't ref a property, so use a local copy
-        var configValue = configuration.SomePropertyToBeSavedAndWithADefault;
-        if (ImGui.Checkbox("Random Config Bool", ref configValue))
-        {
-            configuration.SomePropertyToBeSavedAndWithADefault = configValue;
-            // Can save immediately on change if you don't want to provide a "Save and Close" button
-            configuration.Save();
-        }
-
-        var movable = configuration.IsConfigWindowMovable;
-        if (ImGui.Checkbox("Movable Config Window", ref movable))
-        {
-            configuration.IsConfigWindowMovable = movable;
-            configuration.Save();
-        }
-
+        // ======================
+        // UI SETTINGS
+        // ======================
+        ImGui.Text("UI Settings");
         ImGui.Separator();
-        ImGui.Text("Add Monster");
 
-        ImGui.InputText("Name", ref newMonsterName, 100);
-        ImGui.InputInt("HP", ref newMonsterHP);
-        ImGui.InputInt("DC", ref newMonsterDC);
-
-        if (ImGui.Button("Add Monster"))
+        var initials = configuration.UseInitials;
+        if (ImGui.Checkbox("Use Initials In Party List", ref initials))
         {
-            if (!string.IsNullOrWhiteSpace(newMonsterName))
-            {
-                plugin.Monsters.Add(new Monster
-                {
-                    Name = newMonsterName,
-                    MaxHP = newMonsterHP,
-                    CurrentHP = newMonsterHP,
-                    DC = newMonsterDC
-                });
+            configuration.UseInitials = initials;
+            configuration.Save();
+        }
 
-                newMonsterName = string.Empty;
-                newMonsterHP = 10;
-                newMonsterDC = 10;
-            }
+        ImGui.Spacing();
+
+        // ======================
+        // COMBAT SETTINGS
+        // ======================
+        ImGui.Text("Combat Settings");
+        ImGui.Separator();
+
+        int playerDamage = configuration.DefaultPlayerDamage;
+        ImGui.SetNextItemWidth(70);
+        if (ImGui.InputInt("Default Player Damage", ref playerDamage))
+        {
+            configuration.DefaultPlayerDamage = Math.Max(0, playerDamage);
+            configuration.Save();
+        }
+
+        ImGui.Spacing();
+
+        var clampHp = configuration.ClampHPToZero;
+        if (ImGui.Checkbox("Clamp HP To Zero", ref clampHp))
+        {
+            configuration.ClampHPToZero = clampHp;
+            configuration.Save();
+        }
+
+        var confirmDamage = configuration.ConfirmBeforeApplyingDamage;
+        if (ImGui.Checkbox("Confirm Before Applying Damage", ref confirmDamage))
+        {
+            configuration.ConfirmBeforeApplyingDamage = confirmDamage;
+            configuration.Save();
+        }
+
+        var clearRolls = configuration.ClearRollsAfterResolve;
+        if (ImGui.Checkbox("Clear Rolls After Resolve", ref clearRolls))
+        {
+            configuration.ClearRollsAfterResolve = clearRolls;
+            configuration.Save();
+        }
+
+        var showBreakdown = configuration.ShowRollBreakdown;
+        if (ImGui.Checkbox("Show Roll Breakdown", ref showBreakdown))
+        {
+            configuration.ShowRollBreakdown = showBreakdown;
+            configuration.Save();
+        }
+
+        ImGui.Spacing();
+
+        // ======================
+        // DEFAULT MONSTER TEMPLATE
+        // ======================
+        ImGui.Text("Default Monster Template");
+        ImGui.Separator();
+
+        int defaultHP = configuration.DefaultMonsterHP;
+        ImGui.SetNextItemWidth(70);
+        if (ImGui.InputInt("Default Monster HP", ref defaultHP))
+        {
+            configuration.DefaultMonsterHP = Math.Max(1, defaultHP);
+            configuration.Save();
+        }
+
+        int monsterDamage = configuration.DefaultMonsterDamage;
+        ImGui.SetNextItemWidth(70);
+        if (ImGui.InputInt("Default Monster Damage", ref monsterDamage))
+        {
+            configuration.DefaultMonsterDamage = Math.Max(0, monsterDamage);
+            configuration.Save();
+        }
+
+        int defaultDC = configuration.DefaultMonsterDC;
+        ImGui.SetNextItemWidth(70);
+        if (ImGui.InputInt("Default Monster DC", ref defaultDC))
+        {
+            configuration.DefaultMonsterDC = Math.Max(1, defaultDC);
+            configuration.Save();
+        }
+
+        ImGui.Spacing();
+
+        // ======================
+        // DEBUG
+        // ======================
+        ImGui.Text("Debug");
+        ImGui.Separator();
+
+        var debugMode = configuration.DebugMode;
+        if (ImGui.Checkbox("Enable Debug Mode", ref debugMode))
+        {
+            configuration.DebugMode = debugMode;
+            configuration.Save();
         }
     }
 }

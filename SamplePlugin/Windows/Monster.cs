@@ -10,4 +10,5 @@ public class Monster
     public int MaxHP { get; set; }
     public int CurrentHP { get; set; }
     public int DC { get; set; }
+    public bool IsEngaged { get; set; } = false;
 }
