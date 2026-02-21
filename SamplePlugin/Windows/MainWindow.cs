@@ -83,6 +83,28 @@ public class MainWindow : Window, IDisposable
             }
         }
     }
+    private string GetInitials(string fullName)
+    {
+        if (string.IsNullOrWhiteSpace(fullName))
+            return "?";
+
+        var parts = fullName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        if (parts.Length == 1)
+            return parts[0][0].ToString().ToUpper();
+
+        return $"{char.ToUpper(parts[0][0])}{char.ToUpper(parts[1][0])}";
+    }
+
+    private class PlayerState
+    {
+        public int MaxHP = 0;
+        public int CurrentHP = 0;
+
+        public string Status = "";
+    }
+
+    private readonly Dictionary<uint, PlayerState> playerStates = new();
 
 
     public override void Draw()
@@ -112,20 +134,21 @@ public class MainWindow : Window, IDisposable
             return;
         }
 
-        using (var partyChild = ImRaii.Child("PartyContainer", new Vector2(0, 200f), true))
+        using (var partyChild = ImRaii.Child("PartyContainer", new Vector2(0, 200f), false))
         {
         if (!partyChild.Success)
             return;
 
-        if (ImGui.BeginTable("PartyTable", 4,
+        if (ImGui.BeginTable("PartyTable", 5,
             ImGuiTableFlags.RowBg |
             ImGuiTableFlags.Borders |
             ImGuiTableFlags.SizingStretchProp))
         {
             ImGui.TableSetupColumn("#", ImGuiTableColumnFlags.WidthFixed, 25f);
-            ImGui.TableSetupColumn("Name");
-            ImGui.TableSetupColumn("Job / Level", ImGuiTableColumnFlags.WidthFixed, 110f);
-            ImGui.TableSetupColumn("Last Roll", ImGuiTableColumnFlags.WidthFixed, 70f);
+            ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthFixed, 35f);
+            ImGui.TableSetupColumn("HP", ImGuiTableColumnFlags.WidthFixed, 90f);
+            ImGui.TableSetupColumn("Roll", ImGuiTableColumnFlags.WidthFixed, 50f);
+            ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 70f);
             ImGui.TableHeadersRow();
 
                 for (int i = 0; i < partyList.Length; i++)
@@ -144,21 +167,103 @@ public class MainWindow : Window, IDisposable
                     ImGui.TableNextColumn();
                     ImGui.Text($"{i + 1}");
 
-                    // Name
+                    // NAME COLUMN
                     ImGui.TableNextColumn();
+
+                    var fullName = member.Name.TextValue;
+                    var initials = GetInitials(fullName);
+
                     if (isLocal)
                     {
                         using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(0.3f, 1f, 0.3f, 1f)))
-                            ImGui.Text(member.Name.TextValue);
+                            ImGui.Text(initials);
                     }
                     else
                     {
-                        ImGui.Text(member.Name.TextValue);
+                        ImGui.Text(initials);
                     }
 
-                    // Job/Level
+                    // Tooltip on hover
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text(fullName);
+                        ImGui.EndTooltip();
+                    }
+
+                    // HP COLUMN
                     ImGui.TableNextColumn();
-                    ImGui.Text($"{member.ClassJob.Value.Abbreviation} {member.Level}");
+
+                    // Ensure state exists FIRST
+                    if (!playerStates.TryGetValue(member.EntityId, out var state))
+                    {
+                        state = new PlayerState();
+                        playerStates[member.EntityId] = state;
+                    }
+
+                    if (state.MaxHP <= 0)
+                    {
+                        ImGui.TextDisabled("Unset");
+                        ImGui.SameLine();
+
+                        if (ImGui.SmallButton($"Set##{member.EntityId}"))
+                        {
+                            state.MaxHP = 10;       // Default starting value (change if desired)
+                            state.CurrentHP = 10;
+                        }
+                    }
+                    else
+                    {
+                        // Clamp values safely
+                        state.MaxHP = Math.Max(1, state.MaxHP);
+                        state.CurrentHP = Math.Clamp(state.CurrentHP, 0, state.MaxHP);
+
+                        float hpPercent = (float)state.CurrentHP / state.MaxHP;
+
+                        // Determine color
+                        Vector4 hpColor;
+
+                        if (hpPercent > 0.6f)
+                            hpColor = new Vector4(0.2f, 0.8f, 0.2f, 1f);
+                        else if (hpPercent > 0.3f)
+                            hpColor = new Vector4(0.9f, 0.7f, 0.2f, 1f);
+                        else
+                            hpColor = new Vector4(0.9f, 0.2f, 0.2f, 1f);
+
+                        using (ImRaii.PushColor(ImGuiCol.PlotHistogram, hpColor))
+                        {
+                            ImGui.ProgressBar(
+                                hpPercent,
+                                new Vector2(-1, 0),
+                                $"{state.CurrentHP}/{state.MaxHP}"
+                            );
+                        }
+
+                        // Click HP bar to edit
+                        if (ImGui.IsItemClicked())
+                        {
+                            ImGui.OpenPopup($"EditHP_{member.EntityId}");
+                        }
+
+                        if (ImGui.BeginPopup($"EditHP_{member.EntityId}"))
+                        {
+                            ImGui.InputInt("Max HP", ref state.MaxHP);
+                            ImGui.InputInt("Current HP", ref state.CurrentHP);
+
+                            state.MaxHP = Math.Max(1, state.MaxHP);
+                            state.CurrentHP = Math.Clamp(state.CurrentHP, 0, state.MaxHP);
+
+                            if (ImGui.Button("Full Heal"))
+                                state.CurrentHP = state.MaxHP;
+
+                            ImGui.SameLine();
+
+                            if (ImGui.Button("Close"))
+                                ImGui.CloseCurrentPopup();
+
+                            ImGui.EndPopup();
+                        }
+                    }
 
                     // Last Roll
                     ImGui.TableNextColumn();
@@ -184,7 +289,44 @@ public class MainWindow : Window, IDisposable
                     {
                         ImGui.Text("-");
                     }
+                    // STATUS COLUMN
+                    ImGui.TableNextColumn();
+
+                    // state already exists from HP column logic
+
+                    if (state.MaxHP <= 0)
+                    {
+                        ImGui.Text("-");
+                    }
+                    else if (state.CurrentHP == 0)
+                    {
+                        using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(0.6f, 0.6f, 0.6f, 1f)))
+                            ImGui.Text("Downed");
+                    }
+                    else if (!string.IsNullOrEmpty(state.Status))
+                    {
+                        if (state.Status == "Hit" || state.Status == "Defended")
+                        {
+                            using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(0.2f, 1f, 0.2f, 1f)))
+                                ImGui.Text(state.Status);
+                        }
+                        else if (state.Status == "Miss" || state.Status == "Failed")
+                        {
+                            using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(1f, 0.2f, 0.2f, 1f)))
+                                ImGui.Text(state.Status);
+                        }
+                        else
+                        {
+                            ImGui.Text(state.Status);
+                        }
+                    }
+                    else
+                    {
+                        ImGui.Text("-");
+                    }
+
                 }
+
                 ImGui.EndTable();
                 }
             }
@@ -196,44 +338,119 @@ public class MainWindow : Window, IDisposable
         ImGui.Separator();
         ImGui.Text("Monsters");
 
-        for (int i = 0; i < plugin.Monsters.Count; i++)
+        if (ImGui.BeginTable("MonsterTable", 6,
+            ImGuiTableFlags.RowBg |
+            ImGuiTableFlags.Borders |
+            ImGuiTableFlags.SizingStretchProp))
         {
-            var monster = plugin.Monsters[i];
+            ImGui.TableSetupColumn("#", ImGuiTableColumnFlags.WidthFixed, 25f);
+            ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthFixed, 50f);
+            ImGui.TableSetupColumn("HP", ImGuiTableColumnFlags.WidthFixed, 90f);
+            ImGui.TableSetupColumn("DC", ImGuiTableColumnFlags.WidthFixed, 50f);
+            ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 70f);
+            ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 70f);
+            ImGui.TableHeadersRow();
 
-            ImGui.PushID(i);
-
-            ImGui.Text($"{monster.Name}");
-            ImGui.SameLine();
-            ImGui.Text($"HP: {monster.CurrentHP}/{monster.MaxHP}");
-            ImGui.SameLine();
-            ImGui.Text($"DC: {monster.DC}");
-
-            // Damage Button
-            if (ImGui.Button("-5 HP"))
+            for (int i = 0; i < plugin.Monsters.Count; i++)
             {
-                monster.CurrentHP = Math.Max(0, monster.CurrentHP - 5);
-            }
+                var monster = plugin.Monsters[i];
 
-            ImGui.SameLine();
+                ImGui.TableNextRow();
+                ImGui.PushID(i);
 
-            // Heal Button
-            if (ImGui.Button("+5 HP"))
-            {
-                monster.CurrentHP = Math.Min(monster.MaxHP, monster.CurrentHP + 5);
-            }
+                // INDEX
+                ImGui.TableNextColumn();
+                ImGui.Text($"{i + 1}");
 
-            ImGui.SameLine();
+                // NAME
+                ImGui.TableNextColumn();
+                ImGui.Text(monster.Name);
 
-            // Delete Button
-            if (ImGui.Button("Delete"))
-            {
-                plugin.Monsters.RemoveAt(i);
+                // HP
+                ImGui.TableNextColumn();
+
+                monster.MaxHP = Math.Max(1, monster.MaxHP);
+                monster.CurrentHP = Math.Clamp(monster.CurrentHP, 0, monster.MaxHP);
+
+                float hpPercent = (float)monster.CurrentHP / monster.MaxHP;
+
+                Vector4 hpColor;
+
+                if (hpPercent > 0.6f)
+                    hpColor = new Vector4(0.2f, 0.8f, 0.2f, 1f);
+                else if (hpPercent > 0.3f)
+                    hpColor = new Vector4(0.9f, 0.7f, 0.2f, 1f);
+                else
+                    hpColor = new Vector4(0.9f, 0.2f, 0.2f, 1f);
+
+                using (ImRaii.PushColor(ImGuiCol.PlotHistogram, hpColor))
+                {
+                    ImGui.ProgressBar(
+                        hpPercent,
+                        new Vector2(-1, 0),
+                        $"{monster.CurrentHP}/{monster.MaxHP}"
+                    );
+                }
+
+                if (ImGui.IsItemClicked())
+                    ImGui.OpenPopup($"EditMonsterHP_{i}");
+
+                if (ImGui.BeginPopup($"EditMonsterHP_{i}"))
+                {
+                    int maxHp = monster.MaxHP;
+                    int currentHp = monster.CurrentHP;
+
+                    if (ImGui.InputInt("Max HP", ref maxHp))
+                        monster.MaxHP = maxHp;
+
+                    if (ImGui.InputInt("Current HP", ref currentHp))
+                        monster.CurrentHP = currentHp;
+
+                    monster.MaxHP = Math.Max(1, monster.MaxHP);
+                    monster.CurrentHP = Math.Clamp(monster.CurrentHP, 0, monster.MaxHP);
+
+                    if (ImGui.Button("Full Heal"))
+                        monster.CurrentHP = monster.MaxHP;
+
+                    ImGui.SameLine();
+
+                    if (ImGui.Button("Close"))
+                        ImGui.CloseCurrentPopup();
+
+                    ImGui.EndPopup();
+                }
+
+
+                // DC
+                ImGui.TableNextColumn();
+                ImGui.Text(monster.DC.ToString());
+
+                // STATUS
+                ImGui.TableNextColumn();
+
+                if (monster.CurrentHP == 0)
+                {
+                    using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(0.6f, 0.6f, 0.6f, 1f)))
+                        ImGui.Text("Defeated");
+                }
+                else
+                {
+                    ImGui.Text("-");
+                }
+
+                // ACTIONS
+                ImGui.TableNextColumn();
+
+                if (ImGui.SmallButton("Del"))
+                {
+                    plugin.Monsters.RemoveAt(i);
+                    ImGui.PopID();
+                    break;
+                }
+
                 ImGui.PopID();
-                break;
             }
-
-            ImGui.Separator();
-            ImGui.PopID();
+            ImGui.EndTable();
         }
     }
 }

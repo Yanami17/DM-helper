@@ -90,9 +90,4 @@ public sealed class Plugin : IDalamudPlugin
     
     public void ToggleConfigUi() => ConfigWindow.Toggle();
     public void ToggleMainUi() => MainWindow.Toggle();
-
-    void IDisposable.Dispose()
-    {
-        throw new NotImplementedException();
-    }
 }
