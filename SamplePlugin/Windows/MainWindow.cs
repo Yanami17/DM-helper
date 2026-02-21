@@ -3,10 +3,15 @@ using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
+using Dalamud.Game.Text;
+using Dalamud.Game.Text.SeStringHandling;
 using Lumina.Excel.Sheets;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
+using System.Text.RegularExpressions;
+using System.Reflection.Metadata.Ecma335;
 
 namespace SamplePlugin.Windows;
 
@@ -16,13 +21,9 @@ public class MainWindow : Window, IDisposable
     private readonly Plugin plugin;
 
     private readonly Dictionary<uint, int> lastRolls = new();
-    private readonly Random rng = new();
 
-    // We give this window a hidden ID using ##.
-    // The user will see "My Amazing Window" as window title,
-    // but for ImGui the ID is "My Amazing Window##With a hidden ID"
     public MainWindow(Plugin plugin, string goatImagePath)
-        : base("My Amazing Window##With a hidden ID", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
+        : base("DM Tool##With a hidden ID", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
     {
         SizeConstraints = new WindowSizeConstraints
         {
@@ -32,130 +33,167 @@ public class MainWindow : Window, IDisposable
 
         this.goatImagePath = goatImagePath;
         this.plugin = plugin;
+
+        Plugin.ChatGui.ChatMessage += OnChatMessage;
     }
 
-    public void Dispose() { }
+    public void Dispose()
+    {
+        Plugin.ChatGui.ChatMessage -= OnChatMessage;
+    }
+
+    private void OnChatMessage(
+        XivChatType type,
+        int timestamp,
+        ref SeString sender,
+        ref SeString message,
+        ref bool isHandled)
+    {
+        if (type != XivChatType.Party)
+            return;
+
+        Plugin.Log.Information($"Type: {type}");
+        Plugin.Log.Information($"Sender: '{sender.TextValue}'");
+        Plugin.Log.Information($"Message: '{message.TextValue}'");
+
+        var text = message.TextValue;
+
+        var match = Regex.Match(text, @"Random!.*?(\d+)$");
+        if (!match.Success)
+            return;
+
+        int roll = int.Parse(match.Groups[1].Value);
+
+        var partyList = Plugin.PartyList;
+        if (partyList == null)
+            return;
+
+        string cleanName = sender.TextValue.TrimStart('', '', '', '');
+
+        foreach (var member in partyList)
+        {
+            if (member == null)
+                continue;
+
+            if (member.Name.TextValue.Equals(cleanName, StringComparison.Ordinal))
+            {
+                lastRolls[member.EntityId] = roll;
+                Plugin.Log.Information($"Stored roll {roll} for {cleanName}");
+                break;
+            }
+        }
+    }
+
 
     public override void Draw()
     {
         ImGui.Text($"The random config bool is {plugin.Configuration.SomePropertyToBeSavedAndWithADefault}");
 
-        if (ImGui.Button("Show Settings"))
+        if (ImGui.Button("DM Configs"))
         {
             plugin.ToggleConfigUi();
         }
 
         ImGui.Spacing();
 
-        // Normally a BeginChild() would have to be followed by an unconditional EndChild(),
-        // ImRaii takes care of this after the scope ends.
-        // This works for all ImGui functions that require specific handling, examples are BeginTable() or Indent().
-        using (var child = ImRaii.Child("SomeChildWithAScrollbar", Vector2.Zero, true))
-        {
-            // Check if this child is drawing
-            if (child.Success)
+        //using (var child = ImRaii.Child("SomeChildWithAScrollbar", Vector2.Zero, true))
+        //{
+        //    if (!child.Success)
+        //        return;
+
+            // =============================
+            // PARTY DISPLAY + CHAT ROLLS
+            // =============================
+
+            ImGuiHelpers.ScaledDummy(15.0f);
+            ImGui.Separator();
+            ImGui.Text("Current Party");
+
+            var partyList = Plugin.PartyList;
+
+            if (partyList == null || partyList.Length == 0)
             {
-                // Example for other services that Dalamud provides.
-                // PlayerState provides a wrapper filled with information about the player character.
+                ImGui.Text("Not currently in a party.");
+                return;
+            }
 
-                var playerState = Plugin.PlayerState;
-                if (!playerState.IsLoaded)
-                {
-                    ImGui.Text("Our local player is currently not logged in.");
+            using (var partyChild = ImRaii.Child("PartyContainer", new Vector2(0, 200f), true))
+            {
+                if (!partyChild.Success)
                     return;
-                }
 
-                if (!playerState.ClassJob.IsValid)
+                if (ImGui.BeginTable("PartyTable", 4,
+                    ImGuiTableFlags.RowBg |
+                    ImGuiTableFlags.Borders |
+                    ImGuiTableFlags.SizingStretchProp))
                 {
-                    ImGui.Text("Our current job is currently not valid.");
-                    return;
-                }
+                    ImGui.TableSetupColumn("#", ImGuiTableColumnFlags.WidthFixed, 25f);
+                    ImGui.TableSetupColumn("Name");
+                    ImGui.TableSetupColumn("Job / Level", ImGuiTableColumnFlags.WidthFixed, 110f);
+                    ImGui.TableSetupColumn("Last Roll", ImGuiTableColumnFlags.WidthFixed, 70f);
+                    ImGui.TableHeadersRow();
 
-                // If you want to see the Macro representation of this SeString use `.ToMacroString()`
-                // More info about SeStrings: https://dalamud.dev/plugin-development/sestring/
-                ImGui.Text($"Our current job is ({playerState.ClassJob.RowId}) '{playerState.ClassJob.Value.Abbreviation}' with level {playerState.Level}");
-
-                // Example for querying Lumina, getting the name of our current area.
-                var territoryId = Plugin.ClientState.TerritoryType;
-                if (Plugin.DataManager.GetExcelSheet<TerritoryType>().TryGetRow(territoryId, out var territoryRow))
-                {
-                    ImGui.Text($"We are currently in ({territoryId}) '{territoryRow.PlaceName.Value.Name}'");
-                }
-                else
-                {
-                    ImGui.Text("Invalid territory.");
-                }
-
-                // =============================
-                // PARTY DISPLAY (DROP-IN BLOCK)
-                // =============================
-
-                ImGuiHelpers.ScaledDummy(15.0f);
-                ImGui.Separator();
-                ImGui.Text("Current Party");
-
-                var partyList = Plugin.PartyList;
-
-                if (partyList == null || partyList.Length == 0)
-                {
-                    ImGui.Text("Not currently in a party.");
-                    return;
-                }
-
-                float rowHeight = ImGui.GetTextLineHeightWithSpacing();
-                float tableHeight = rowHeight * partyList.Length + 30f;
-
-                using (var partyChild = ImRaii.Child("PartyContainer", new Vector2(0, 200f), true))
-                {
-                    if (!partyChild.Success)
-                        return;
-
-                    if (ImGui.BeginTable("PartyTable", 3,
-                        ImGuiTableFlags.RowBg |
-                        ImGuiTableFlags.Borders |
-                        ImGuiTableFlags.SizingStretchProp))
+                    for (int i = 0; i < partyList.Length; i++)
                     {
-                        ImGui.TableSetupColumn("#", ImGuiTableColumnFlags.WidthFixed, 25f);
-                        ImGui.TableSetupColumn("Name");
-                        ImGui.TableSetupColumn("Job / Level", ImGuiTableColumnFlags.WidthFixed, 110f);
-                        ImGui.TableHeadersRow();
+                        var member = partyList[i];
+                        if (member == null)
+                            continue;
 
-                        for (int i = 0; i < partyList.Length; i++)
+                        ImGui.TableNextRow();
+
+                        bool isLocal =
+                            Plugin.ObjectTable.LocalPlayer != null &&
+                            member.EntityId == Plugin.ObjectTable.LocalPlayer.EntityId;
+
+                        // Index
+                        ImGui.TableNextColumn();
+                        ImGui.Text($"{i + 1}");
+
+                        // Name
+                        ImGui.TableNextColumn();
+                        if (isLocal)
                         {
-                            var member = partyList[i];
-                            if (member == null)
-                                continue;
+                            using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(0.3f, 1f, 0.3f, 1f)))
+                                ImGui.Text(member.Name.TextValue);
+                        }
+                        else
+                        {
+                            ImGui.Text(member.Name.TextValue);
+                        }
 
-                            ImGui.TableNextRow();
+                        // Job/Level
+                        ImGui.TableNextColumn();
+                        ImGui.Text($"{member.ClassJob.Value.Abbreviation} {member.Level}");
 
-                            bool isLocal =
-                                Plugin.ObjectTable.LocalPlayer != null &&
-                                member.EntityId == Plugin.ObjectTable.LocalPlayer.EntityId;
+                        // Last Roll
+                        ImGui.TableNextColumn();
 
-                            ImGui.TableNextColumn();
-                            ImGui.Text($"{i + 1}");
-
-                            ImGui.TableNextColumn();
-                            if (isLocal)
+                        if (lastRolls.TryGetValue(member.EntityId, out var roll))
+                        {
+                            if (roll == 20)
                             {
-                                using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(0.3f, 1f, 0.3f, 1f)))
-                                {
-                                    ImGui.Text($"{member.Name.TextValue} (You)");
-                                }
+                                using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(0.2f, 1f, 0.2f, 1f)))
+                                    ImGui.Text(roll.ToString());
+                            }
+                            else if (roll == 1)
+                            {
+                                using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(1f, 0.2f, 0.2f, 1f)))
+                                    ImGui.Text(roll.ToString());
                             }
                             else
                             {
-                                ImGui.Text(member.Name.TextValue);
+                                ImGui.Text(roll.ToString());
                             }
-
-                            ImGui.TableNextColumn();
-                            ImGui.Text($"{member.ClassJob.Value.Abbreviation} {member.Level}");
                         }
-
-                        ImGui.EndTable();
+                        else
+                        {
+                            ImGui.Text("-");
+                        }
                     }
+
+                    ImGui.EndTable();
                 }
             }
-        }
+        //}
     }
 }
