@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 
-namespace SamplePlugin.Windows;
+namespace DMHelper.Windows;
 
 public class CombatManager
 {

@@ -6,7 +6,7 @@ using System.Text;
 using System.Numerics;
 
 
-namespace SamplePlugin.Windows
+namespace DMHelper.Windows
 {
     public class PartyPanel
     {

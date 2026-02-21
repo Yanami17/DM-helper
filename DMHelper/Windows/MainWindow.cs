@@ -4,7 +4,7 @@ using Dalamud.Interface.Windowing;
 using System;
 using System.Numerics;
 
-namespace SamplePlugin.Windows;
+namespace DMHelper.Windows;
 
 public class MainWindow : Window, IDisposable
 {

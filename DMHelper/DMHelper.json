@@ -1,0 +1,9 @@
+{
+  "Author": "Toyako",
+  "Name": "DM Helper Tool",
+  "Punchline": "Send help I'm trapped in a sweatshop dear god please",
+  "Description": "Encounter management tool for DMs.",
+  "InternalName": "DMHelper",
+  "ApplicableVersion": "any",
+  "Tags": [ "utility", "combat", "dm" ]
+}
