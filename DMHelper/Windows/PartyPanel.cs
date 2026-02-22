@@ -2,8 +2,9 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility.Raii;
 using System;
 using System.Collections.Generic;
-using System.Text;
+using System.Linq;
 using System.Numerics;
+using System.Text;
 
 
 namespace DMHelper.Windows
@@ -146,27 +147,46 @@ namespace DMHelper.Windows
                         // Last Roll
                         ImGui.TableNextColumn();
 
-                        if (combat.LastRolls.TryGetValue(member.EntityId, out var roll))
+                        int? roll = null;
+
+                        if (combat.CurrentPhase == CombatManager.CombatPhase.Attack)
                         {
-                            if (roll == 20)
+                            if (combat.AttackRolls.TryGetValue(member.EntityId, out var monsterRolls)
+                                && monsterRolls.Count > 0)
+                            {
+                                roll = monsterRolls.Values.First();
+                            }
+                        }
+                        else if (combat.CurrentPhase == CombatManager.CombatPhase.Defense)
+                        {
+                            if (combat.DefenseRolls.TryGetValue(member.EntityId, out var defenseRoll))
+                            {
+                                roll = defenseRoll;
+                            }
+                        }
+
+                        if (roll.HasValue)
+                        {
+                            if (roll.Value == 20)
                             {
                                 using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(0.2f, 1f, 0.2f, 1f)))
-                                    ImGui.Text(roll.ToString());
+                                    ImGui.Text(roll.Value.ToString());
                             }
-                            else if (roll == 1)
+                            else if (roll.Value == 1)
                             {
                                 using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(1f, 0.2f, 0.2f, 1f)))
-                                    ImGui.Text(roll.ToString());
+                                    ImGui.Text(roll.Value.ToString());
                             }
                             else
                             {
-                                ImGui.Text(roll.ToString());
+                                ImGui.Text(roll.Value.ToString());
                             }
                         }
                         else
                         {
                             ImGui.Text("-");
                         }
+
                         // STATUS COLUMN
                         ImGui.TableNextColumn();
 

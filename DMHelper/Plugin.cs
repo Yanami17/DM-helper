@@ -32,10 +32,16 @@ public sealed class Plugin : IDalamudPlugin
     public readonly WindowSystem WindowSystem = new("DMHelper");
     private ConfigWindow ConfigWindow { get; init; }
     private MainWindow MainWindow { get; init; }
+    public CombatManager CombatManager { get; private set; } = null!;
+
 
     public Plugin()
     {
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
+
+        Log.Information($"ChatGui null? {ChatGui == null}");
+
+        CombatManager = new CombatManager(this);
 
         // You might normally want to embed resources and load them from the manifest stream
         var goatImagePath = Path.Combine(PluginInterface.AssemblyLocation.Directory?.FullName!, "goat.png");
@@ -64,6 +70,7 @@ public sealed class Plugin : IDalamudPlugin
         // Add a simple message to the log with level set to information
         // Use /xllog to open the log window in-game
         // Example Output: 00:57:54.959 | INF | [DMHelper] ===A cool log message from Sample Plugin===
+
         Log.Information($"===A cool log message from {PluginInterface.Manifest.Name}===");
     }
 
@@ -73,8 +80,11 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi -= ToggleMainUi;
+
         
         WindowSystem.RemoveAllWindows();
+
+        CombatManager.Dispose();
 
         ConfigWindow.Dispose();
         MainWindow.Dispose();

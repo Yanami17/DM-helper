@@ -13,6 +13,7 @@ public class MainWindow : Window, IDisposable
     private readonly CombatManager combat;
     private readonly PartyPanel partyPanel;
     private readonly MonsterPanel monsterPanel;
+    private readonly DMFeedPanel dmFeed;
 
 
     public MainWindow(Plugin plugin, string goatImagePath)
@@ -26,15 +27,15 @@ public class MainWindow : Window, IDisposable
 
 
         this.plugin = plugin;
-
-        combat = new CombatManager(plugin);
+        combat = plugin.CombatManager;
         partyPanel = new PartyPanel(plugin, combat);
         monsterPanel = new MonsterPanel(plugin);
+        dmFeed = new DMFeedPanel(combat);
     }
 
     public void Dispose()
     {
-        combat.Dispose();
+
     }
 
     // =========================================================
@@ -93,5 +94,8 @@ public class MainWindow : Window, IDisposable
 
         ImGui.Separator();
         monsterPanel.Draw();
+
+        ImGui.Separator();
+        dmFeed.Draw();
     }
 }
