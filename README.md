@@ -1,3 +1,9 @@
+# REPO URL COPY THIS INTO DALAMUD
+
+`https://raw.githubusercontent.com/Yanami17/DM-helper/master/repo.json`
+
+
+
 > ⚠️ **Don't click Fork!**
 > 
 > This is a GitHub Template repo. If you want to use this for a plugin, [use this template][new-repo] to make a new repo!
