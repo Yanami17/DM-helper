@@ -17,5 +17,6 @@
     <Content Include="DMHelper.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="repo.json" />
   </ItemGroup>
 </Project>
