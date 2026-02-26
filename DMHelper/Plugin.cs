@@ -33,6 +33,7 @@ public sealed class Plugin : IDalamudPlugin
     private ConfigWindow ConfigWindow { get; init; }
     private MainWindow MainWindow { get; init; }
     public CombatManager CombatManager { get; private set; } = null!;
+    public List<FakePartyMember> FakePartyMembers { get; } = new();
 
 
     public Plugin()

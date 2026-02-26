@@ -16,4 +16,7 @@ public class CombatLogEntry
     public int Damage { get; set; }
 
     public string Phase { get; set; } = string.Empty;
+
+    // Generated once at creation time, not at draw time
+    public string Phrase { get; set; } = string.Empty;
 }

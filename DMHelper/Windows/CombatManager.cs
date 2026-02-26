@@ -6,7 +6,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
-using FFXIVClientStructs.FFXIV.Client.UI.Arrays;
 
 namespace DMHelper.Windows;
 
@@ -20,11 +19,12 @@ public class CombatManager
     public readonly Dictionary<uint, int> DefenseRolls = new();
     public readonly Dictionary<uint, PlayerState> PlayerStates = new();
     public readonly Dictionary<uint, List<Guid>> DeclaredTargets = new();
+    public readonly Dictionary<Guid, List<uint>> MonsterTargets = new();
 
     public readonly List<CombatLogEntry> CombatLog = new();
 
-    public int PlayerBaseDamage = 1;
-    public int MonsterBaseDamage = 1;
+    public int PlayerBaseDamage => plugin.Configuration.DefaultPlayerDamage;
+    public int MonsterBaseDamage => plugin.Configuration.DefaultMonsterDamage;
 
     public CombatManager(Plugin plugin)
     {
@@ -49,52 +49,73 @@ public class CombatManager
         ref SeString message,
         ref bool isHandled)
     {
-
-        if (type != XivChatType.Party)
-            return;
-
         if (CurrentPhase == CombatPhase.None)
             return;
 
-        var match = Regex.Match(message.TextValue, @"Random!.*?(\d+)$");
-        if (!match.Success)
+        bool isParty = type == XivChatType.Party;
+        bool isSay = type == XivChatType.Say;
+
+        if (!isParty && !isSay)
             return;
 
-        int roll = int.Parse(match.Groups[1].Value);
+        // Party chat format:  "Random! ... 7"         (number at end)
+        // Say chat format:    "Random! You roll a 7 (out of 20)."
+        var matchParty = Regex.Match(message.TextValue, @"Random!.*?(\d+)$");
+        var matchSay = Regex.Match(message.TextValue, @"Random! You roll a (\d+) \(out of \d+\)");
 
+        if (plugin.Configuration.DebugMode)
+        {
+            Plugin.Log.Debug($"[DMHelper] Chat captured | Type: {type} | Sender: '{sender.TextValue}' | Message: '{message.TextValue}'");
+            Plugin.Log.Debug($"[DMHelper] Regex results | matchParty: {matchParty.Success} | matchSay: {matchSay.Success}");
+        }
+
+        int roll;
+
+        if (isSay && matchSay.Success)
+        {
+            roll = int.Parse(matchSay.Groups[1].Value);
+            Plugin.Log.Information($"[DMHelper] Say roll parsed: {roll}");
+        }
+        else if (isParty && matchParty.Success)
+        {
+            roll = int.Parse(matchParty.Groups[1].Value);
+            Plugin.Log.Information($"[DMHelper] Party roll parsed: {roll}");
+        }
+        else
+        {
+            if (plugin.Configuration.DebugMode)
+                Plugin.Log.Debug($"[DMHelper] No roll pattern matched — message ignored.");
+            return;
+        }
+
+        // --- SAY CHAT: route to the fake member with ListenOnSay active ---
+        if (isSay)
+        {
+            var fakeMember = plugin.FakePartyMembers.FirstOrDefault(f => f.ListenOnSay);
+            if (fakeMember == null)
+            {
+                Plugin.Log.Warning("Say roll ignored: no fake member has ListenOnSay enabled.");
+                return;
+            }
+
+            Plugin.Log.Information($"Say roll {roll} routed to fake member '{fakeMember.Name}'");
+            StoreRoll(fakeMember.EntityId, roll);
+            return;
+        }
+
+        // --- PARTY CHAT: normal real-member matching ---
         var partyList = Plugin.PartyList;
         if (partyList == null)
             return;
 
-        Plugin.Log.Information("---- Sender Payload Dump ----");
-
-        foreach (var p in sender.Payloads)
-        {
-            Plugin.Log.Information($"Type: {p.GetType().Name} | Text: '{p.ToString()}'");
-        }
-
-        Plugin.Log.Information($"Flattened TextValue: '{sender.TextValue}'");
-        Plugin.Log.Information("--------------------------------");
-
-
-        // --- NORMALIZED NAME MATCHING (Cross-World Safe) ---
-
-        // Get sender text as displayed
         var rawSender = sender.TextValue.Trim();
-
-        // Remove leading formatting junk
         rawSender = Regex.Replace(rawSender, @"^[^\p{L}]+", "");
 
         var member = partyList.FirstOrDefault(m =>
         {
-            if (m == null)
-                return false;
-
-            var partyNameFull = m.Name.TextValue;
-            var partyBaseName = partyNameFull.Split('@')[0].Trim();
-
-            // If sender begins with the character name, it's a match
-            return rawSender.StartsWith(partyBaseName, StringComparison.OrdinalIgnoreCase);
+            if (m == null) return false;
+            var baseName = m.Name.TextValue.Split('@')[0].Trim();
+            return rawSender.StartsWith(baseName, StringComparison.OrdinalIgnoreCase);
         });
 
         if (member == null)
@@ -103,55 +124,92 @@ public class CombatManager
             return;
         }
 
-        uint playerId = member.EntityId;
+        Plugin.Log.Information($"Party roll {roll} stored for {member.Name.TextValue}");
+        StoreRoll(member.EntityId, roll);
+    }
 
+    // =========================================================
+    // ROLL STORAGE (shared between real and fake members)
+    // =========================================================
 
+    public void StoreRoll(uint entityId, int roll)
+    {
         if (CurrentPhase == CombatPhase.Attack)
         {
-            if (!DeclaredTargets.TryGetValue(playerId, out var targets))
-            {
-                Plugin.Log.Warning("Roll ignored: No target declared.");
-                targets = plugin.Monsters
-                    .Where(m => m.IsEngaged && m.CurrentHP > 0)
-                    .Select(m => m.Id)
-                    .ToList();
+            if (!AttackRolls.ContainsKey(entityId))
+                AttackRolls[entityId] = new Dictionary<Guid, int>();
 
-                if (targets.Count == 0)
-                    return;
-            }
-
-            if (!AttackRolls.ContainsKey(playerId))
-                AttackRolls[playerId] = new Dictionary<Guid, int>();
-
-            foreach (var monsterId in targets)
-                AttackRolls[playerId][monsterId] = roll;
+            // Store the roll against a placeholder — targets are assigned by the DM after rolling
+            // ResolveAttackPhase will map rolls to declared targets at resolution time
+            AttackRolls[entityId][Guid.Empty] = roll;
         }
         else if (CurrentPhase == CombatPhase.Defense)
         {
-            DefenseRolls[playerId] = roll;
+            DefenseRolls[entityId] = roll;
         }
-
-        Plugin.Log.Information($"Stored roll {roll} for {member.Name.TextValue}");
-        Plugin.Log.Information($"AttackRolls players: {AttackRolls.Count}");
-        Plugin.Log.Information($"DefenseRolls players: {DefenseRolls.Count}");
     }
 
-    private string GetPlayerName(uint playerId)
+    // =========================================================
+    // MANUAL ROLL (for fake members without ListenOnSay)
+    // =========================================================
+
+    public void RollForFakeMember(FakePartyMember fakeMember)
+    {
+        int roll = new Random().Next(1, 21);
+        LogManualRoll(fakeMember, roll);
+    }
+
+    // =========================================================
+    // NAME LOOKUP (real + fake)
+    // =========================================================
+
+    private string GetPlayerName(uint entityId)
     {
         var partyList = Plugin.PartyList;
-        if (partyList == null)
-            return "Unknown";
-
-        foreach (var member in partyList)
+        if (partyList != null)
         {
-            if (member == null)
-                continue;
-
-            if (member.EntityId == playerId)
-                return member.Name.TextValue;
+            foreach (var member in partyList)
+            {
+                if (member != null && member.EntityId == entityId)
+                    return member.Name.TextValue;
+            }
         }
 
+        var fake = plugin.FakePartyMembers.FirstOrDefault(f => f.EntityId == entityId);
+        if (fake != null)
+            return fake.Name;
+
         return "Unknown";
+    }
+
+    public bool HasRolled(uint entityId)
+    {
+        if (CurrentPhase == CombatPhase.Attack)
+            return AttackRolls.ContainsKey(entityId);
+        if (CurrentPhase == CombatPhase.Defense)
+            return DefenseRolls.ContainsKey(entityId);
+        return false;
+    }
+
+    public bool HasPendingRolls =>
+        AttackRolls.Count > 0 || DefenseRolls.Count > 0;
+
+    public void OnMonsterRemoved(Monster monster)
+    {
+        // Clean up any player declared targets pointing at this monster
+        foreach (var list in DeclaredTargets.Values)
+            list.Remove(monster.Id);
+
+        // Clean up monster's own target list
+        MonsterTargets.Remove(monster.Id);
+
+        Plugin.Log.Information($"[DMHelper] Cleaned up targets for removed monster '{monster.Name}'");
+    }
+
+    public void LogManualRoll(FakePartyMember fake, int roll)
+    {
+        Plugin.Log.Information($"[DMHelper] Manual roll {roll} generated for fake member '{fake.Name}'");
+        StoreRoll(fake.EntityId, roll);
     }
 
     public void DeclareTarget(uint playerId, Guid monsterId)
@@ -161,6 +219,15 @@ public class CombatManager
 
         if (!DeclaredTargets[playerId].Contains(monsterId))
             DeclaredTargets[playerId].Add(monsterId);
+    }
+
+    public void DeclareMonsterTarget(Guid monsterId, uint playerId)
+    {
+        if (!MonsterTargets.ContainsKey(monsterId))
+            MonsterTargets[monsterId] = new List<uint>();
+
+        if (!MonsterTargets[monsterId].Contains(playerId))
+            MonsterTargets[monsterId].Add(playerId);
     }
 
     private void ResolveAttack(uint playerId, PlayerState player, Monster monster, int roll)
@@ -188,7 +255,8 @@ public class CombatManager
             DC = monster.DC,
             Success = success,
             Damage = damage,
-            Phase = "Attack"
+            Phase = "Attack",
+            Phrase = CombatPhrases.Get("Attack", success, playerName, monster.Name, damage)
         });
     }
 
@@ -201,18 +269,50 @@ public class CombatManager
             if (!PlayerStates.TryGetValue(playerId, out var player))
                 continue;
 
-            foreach (var targetEntry in playerEntry.Value)
-            {
-                Guid monsterId = targetEntry.Key;
-                int roll = targetEntry.Value;
+            // Get the roll value — stored under Guid.Empty placeholder
+            if (!playerEntry.Value.TryGetValue(Guid.Empty, out int roll))
+                continue;
 
+            // Require explicit targets declared by the DM
+            if (!DeclaredTargets.TryGetValue(playerId, out var targets) || targets.Count == 0)
+            {
+                Plugin.Log.Warning($"[DMHelper] {GetPlayerName(playerId)} rolled but has no targets declared — skipping.");
+                continue;
+            }
+
+            foreach (var monsterId in targets)
+            {
                 var monster = plugin.Monsters.FirstOrDefault(m => m.Id == monsterId);
                 if (monster == null || monster.CurrentHP <= 0)
                     continue;
 
                 ResolveAttack(playerId, player, monster, roll);
             }
+
+            // If every declared target was already defeated, log it
+            bool anyResolved = targets.Any(id =>
+            {
+                var m = plugin.Monsters.FirstOrDefault(x => x.Id == id);
+                return m != null && m.CurrentHP > 0;
+            });
+
+            if (!anyResolved)
+            {
+                string playerName = GetPlayerName(playerId);
+                CombatLog.Add(new CombatLogEntry
+                {
+                    Actor = playerName,
+                    Target = string.Empty,
+                    Phase = "Attack",
+                    Phrase = $"{playerName}'s targets were already defeated — nothing to resolve.",
+                });
+            }
         }
+
+        // Apply or stage pending damage based on AutoApplyDamage config
+        if (plugin.Configuration.AutoApplyDamage)
+            ApplyPendingDamage();
+        // else: pending damage sits on monsters until DM confirms via MainWindow
     }
 
     private void ResolveDefense(uint playerId, PlayerState player, Monster monster, int roll)
@@ -230,6 +330,27 @@ public class CombatManager
         {
             player.Status = "Failed";
             player.CurrentHP -= damage;
+
+            if (plugin.Configuration.ClampHPToZero && player.CurrentHP < 0)
+                player.CurrentHP = 0;
+
+            if (player.CurrentHP <= 0)
+            {
+                player.CurrentHP = 0;
+                Plugin.Log.Information($"[DMHelper] {playerName} has been downed.");
+
+                CombatLog.Add(new CombatLogEntry
+                {
+                    Actor = monster.Name,
+                    Target = playerName,
+                    Roll = 0,
+                    DC = 0,
+                    Success = true,
+                    Damage = 0,
+                    Phase = "PlayerDowned",
+                    Phrase = CombatPhrases.Get("PlayerDowned", true, monster.Name, playerName, 0)
+                });
+            }
         }
 
         CombatLog.Add(new CombatLogEntry
@@ -240,7 +361,8 @@ public class CombatManager
             DC = monster.DC,
             Success = success,
             Damage = damage,
-            Phase = "Defense"
+            Phase = "Defense",
+            Phrase = CombatPhrases.Get("Defense", success, monster.Name, playerName, damage)
         });
     }
 
@@ -254,15 +376,21 @@ public class CombatManager
             if (!PlayerStates.TryGetValue(playerId, out var player))
                 continue;
 
-            // All engaged monsters attack
+            // Only monsters that have explicitly declared this player as a target
             var attackers = plugin.Monsters
-                .Where(m => m.IsEngaged && m.CurrentHP > 0)
+                .Where(m => m.IsEngaged && m.CurrentHP > 0
+                    && MonsterTargets.TryGetValue(m.Id, out var targets)
+                    && targets.Contains(playerId))
                 .ToList();
 
-            foreach (var monster in attackers)
+            if (attackers.Count == 0)
             {
-                ResolveDefense(playerId, player, monster, roll);
+                Plugin.Log.Warning($"[DMHelper] Defense roll ignored for entity {playerId} — no monster has declared them as a target.");
+                continue;
             }
+
+            foreach (var monster in attackers)
+                ResolveDefense(playerId, player, monster, roll);
         }
     }
 
@@ -284,8 +412,36 @@ public class CombatManager
         else if (CurrentPhase == CombatPhase.Defense)
             ResolveDefensePhase();
 
-        ClearRolls();
+        if (plugin.Configuration.ClearRollsAfterResolve)
+            ClearRolls();
+
         ClearDeclaredTargets();
+    }
+
+    // Called by MainWindow when AutoApplyDamage is off and DM confirms damage
+    public void ApplyPendingDamage()
+    {
+        foreach (var monster in plugin.Monsters)
+        {
+            if (monster.PendingDamage <= 0)
+                continue;
+
+            Plugin.Log.Information($"[DMHelper] Applying {monster.PendingDamage} damage to {monster.Name}");
+            monster.CurrentHP = Math.Max(0, monster.CurrentHP - monster.PendingDamage);
+            monster.PendingDamage = 0;
+
+            if (monster.CurrentHP == 0)
+            {
+                monster.IsEngaged = false;
+                CombatLog.Add(new CombatLogEntry
+                {
+                    Actor = monster.Name,
+                    Target = monster.Name,
+                    Phase = "MonsterDefeated",
+                    Phrase = CombatPhrases.Get("MonsterDefeated", true, string.Empty, monster.Name, 0)
+                });
+            }
+        }
     }
 
     public void ClearRolls()
@@ -294,20 +450,20 @@ public class CombatManager
         DefenseRolls.Clear();
     }
 
-
     public void ClearStatuses()
     {
         foreach (var state in PlayerStates.Values)
             state.Status = "";
     }
+
     public void ClearDeclaredTargets()
     {
         DeclaredTargets.Clear();
+        MonsterTargets.Clear();
     }
 
-
     // =========================================================
-    // ADDITIONAL CONSTRUCTORS
+    // ENUMS & NESTED TYPES
     // =========================================================
 
     public enum CombatPhase

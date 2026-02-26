@@ -2,7 +2,7 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility.Raii;
 using System;
 using System.Collections.Generic;
-using System.Text;
+using System.Linq;
 using System.Numerics;
 
 
@@ -26,11 +26,9 @@ namespace DMHelper.Windows
 
         public void Draw()
         {
-
             // ADD MONSTER BUTTON
             if (ImGui.Button("Add Monster"))
             {
-                // Reset to defaults every time popup opens
                 newMonsterName = string.Empty;
                 newMonsterHP = plugin.Configuration.DefaultMonsterHP;
                 newMonsterDC = plugin.Configuration.DefaultMonsterDC;
@@ -71,7 +69,8 @@ namespace DMHelper.Windows
                             Name = newMonsterName,
                             MaxHP = newMonsterHP,
                             CurrentHP = newMonsterHP,
-                            DC = newMonsterDC
+                            DC = newMonsterDC,
+                            IsEngaged = plugin.Configuration.AutoEngageOnAdd
                         });
 
                         ImGui.CloseCurrentPopup();
@@ -81,19 +80,18 @@ namespace DMHelper.Windows
                 ImGui.SameLine();
 
                 if (ImGui.Button("Cancel"))
-                {
                     ImGui.CloseCurrentPopup();
-                }
 
                 ImGui.EndPopup();
             }
 
             ImGui.Separator();
-
-
             ImGui.Text("Monsters");
 
-            if (ImGui.BeginTable("MonsterTable", 7,
+            bool isDefensePhase = plugin.CombatManager.CurrentPhase == CombatManager.CombatPhase.Defense;
+            int columnCount = isDefensePhase ? 8 : 7;
+
+            if (ImGui.BeginTable("MonsterTable", columnCount,
                 ImGuiTableFlags.RowBg |
                 ImGuiTableFlags.Borders |
                 ImGuiTableFlags.SizingStretchProp))
@@ -102,9 +100,11 @@ namespace DMHelper.Windows
                 ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthFixed, 90f);
                 ImGui.TableSetupColumn("HP", ImGuiTableColumnFlags.WidthFixed, 90f);
                 ImGui.TableSetupColumn("DC", ImGuiTableColumnFlags.WidthFixed, 50f);
-                ImGui.TableSetupColumn("Active", ImGuiTableColumnFlags.WidthFixed, 50f);
                 ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 70f);
-                ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 70f);
+                ImGui.TableSetupColumn("Engaged", ImGuiTableColumnFlags.WidthFixed, 60f);
+                if (isDefensePhase)
+                    ImGui.TableSetupColumn("Target", ImGuiTableColumnFlags.WidthFixed, 90f);
+                ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 50f);
                 ImGui.TableHeadersRow();
 
                 for (int i = 0; i < plugin.Monsters.Count; i++)
@@ -129,6 +129,9 @@ namespace DMHelper.Windows
                     monster.CurrentHP = Math.Clamp(monster.CurrentHP, 0, monster.MaxHP);
 
                     UiHelpers.DrawHpBar(monster.CurrentHP, monster.MaxHP, new Vector2(-1, 0));
+
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Click to edit HP");
 
                     if (ImGui.IsItemClicked())
                         ImGui.OpenPopup($"EditMonsterHP_{i}");
@@ -158,31 +161,11 @@ namespace DMHelper.Windows
                         ImGui.EndPopup();
                     }
 
-
                     // DC
                     ImGui.TableNextColumn();
                     ImGui.Text(monster.DC.ToString());
 
-                    // ENGAGED COLUMN (before Status)
-                    ImGui.TableNextColumn();
-
-                    if (monster.CurrentHP > 0)
-                    {
-                        bool engaged = monster.IsEngaged;
-
-                        if (ImGui.Checkbox("##engaged", ref engaged))
-                            monster.IsEngaged = engaged;
-
-                        if (ImGui.IsItemHovered())
-                            ImGui.SetTooltip("Include in combat resolution");
-                    }
-                    else
-                    {
-                        ImGui.TextDisabled("-");
-                    }
-
-
-                    // STATUS
+                    // STATUS (with targeting indicator)
                     ImGui.TableNextColumn();
 
                     if (monster.CurrentHP == 0)
@@ -195,11 +178,61 @@ namespace DMHelper.Windows
                         ImGui.Text("-");
                     }
 
+                    // Targeting indicator during Attack Phase
+                    if (plugin.CombatManager.CurrentPhase == CombatManager.CombatPhase.Attack)
+                    {
+                        int targetingCount = plugin.CombatManager.DeclaredTargets
+                            .Count(kvp => kvp.Value.Contains(monster.Id));
+
+                        if (targetingCount > 0)
+                        {
+                            ImGui.SameLine();
+                            using (ImRaii.PushColor(ImGuiCol.Text, new Vector4(0.3f, 0.9f, 1f, 1f)))
+                                ImGui.TextUnformatted($"×{targetingCount}");
+
+                            if (ImGui.IsItemHovered())
+                                ImGui.SetTooltip($"{targetingCount} player(s) targeting this monster");
+                        }
+                    }
+
+                    // ENGAGED
+                    ImGui.TableNextColumn();
+
+                    if (monster.CurrentHP > 0)
+                    {
+                        bool engaged = monster.IsEngaged;
+                        if (ImGui.Checkbox("##engaged", ref engaged))
+                            monster.IsEngaged = engaged;
+
+                        if (ImGui.IsItemHovered())
+                            ImGui.SetTooltip("Include in combat resolution");
+                    }
+                    else
+                    {
+                        ImGui.TextDisabled("-");
+                    }
+
+                    // TARGET COLUMN (Defense Phase only)
+                    if (isDefensePhase)
+                    {
+                        ImGui.TableNextColumn();
+
+                        if (monster.CurrentHP <= 0 || !monster.IsEngaged)
+                        {
+                            ImGui.TextDisabled("-");
+                        }
+                        else
+                        {
+                            DrawMonsterTargetColumn(monster);
+                        }
+                    }
+
                     // ACTIONS
                     ImGui.TableNextColumn();
 
                     if (ImGui.SmallButton("Del"))
                     {
+                        plugin.CombatManager.OnMonsterRemoved(monster);
                         plugin.Monsters.RemoveAt(i);
                         ImGui.PopID();
                         break;
@@ -207,9 +240,126 @@ namespace DMHelper.Windows
 
                     ImGui.PopID();
                 }
+
                 ImGui.EndTable();
             }
         }
-    }
 
+        // =========================================================
+        // MONSTER TARGET PICKER (Defense Phase)
+        // =========================================================
+
+        private void DrawMonsterTargetColumn(Monster monster)
+        {
+            var combat = plugin.CombatManager;
+
+            // Build full player list (real + fake)
+            var allPlayers = GetAllPlayers();
+
+            if (allPlayers.Count == 0)
+            {
+                ImGui.TextDisabled("None");
+                return;
+            }
+
+            combat.MonsterTargets.TryGetValue(monster.Id, out var selectedIds);
+            selectedIds ??= new List<uint>();
+
+            // Build summary label
+            string label = selectedIds.Count == 0
+                ? "None"
+                : string.Join(", ", selectedIds
+                    .Select(id => allPlayers.FirstOrDefault(p => p.entityId == id).name)
+                    .Where(n => n != null));
+
+            if (label.Length > 10)
+                label = label.Substring(0, 9) + "…";
+
+            string popupId = $"MonsterTargetPicker_{monster.Id}";
+
+            if (ImGui.SmallButton($"{label}##{monster.Id}"))
+                ImGui.OpenPopup(popupId);
+
+            // Tooltip showing full target list
+            if (ImGui.IsItemHovered() && selectedIds.Count > 0)
+            {
+                ImGui.BeginTooltip();
+                ImGui.Text("Targeting:");
+                foreach (var id in selectedIds)
+                {
+                    var pName = allPlayers.FirstOrDefault(p => p.entityId == id).name ?? "?";
+                    ImGui.BulletText(pName);
+                }
+                ImGui.EndTooltip();
+            }
+
+            if (ImGui.BeginPopup(popupId))
+            {
+                ImGui.Text($"Targets for {monster.Name}");
+                ImGui.Separator();
+
+                foreach (var (entityId, name) in allPlayers)
+                {
+                    bool isSelected = selectedIds.Contains(entityId);
+
+                    if (ImGui.Checkbox(name, ref isSelected))
+                    {
+                        if (isSelected)
+                        {
+                            combat.DeclareMonsterTarget(monster.Id, entityId);
+                        }
+                        else
+                        {
+                            if (combat.MonsterTargets.TryGetValue(monster.Id, out var list))
+                                list.Remove(entityId);
+                        }
+                    }
+                }
+
+                ImGui.Separator();
+
+                if (ImGui.SmallButton("All"))
+                {
+                    foreach (var (entityId, _) in allPlayers)
+                        combat.DeclareMonsterTarget(monster.Id, entityId);
+                }
+
+                ImGui.SameLine();
+
+                if (ImGui.SmallButton("None"))
+                {
+                    if (combat.MonsterTargets.ContainsKey(monster.Id))
+                        combat.MonsterTargets[monster.Id].Clear();
+                }
+
+                ImGui.SameLine();
+
+                if (ImGui.SmallButton("Close"))
+                    ImGui.CloseCurrentPopup();
+
+                ImGui.EndPopup();
+            }
+        }
+
+        // Returns all real party members + fake members as (entityId, displayName) tuples
+        private List<(uint entityId, string name)> GetAllPlayers()
+        {
+            var result = new List<(uint, string)>();
+
+            var partyList = Plugin.PartyList;
+            if (partyList != null)
+            {
+                foreach (var member in partyList)
+                {
+                    if (member != null)
+                        result.Add((member.EntityId, member.Name.TextValue));
+                }
+            }
+
+            foreach (var fake in plugin.FakePartyMembers)
+                result.Add((fake.EntityId, fake.Name));
+
+            return result;
+        }
+    }
 }
