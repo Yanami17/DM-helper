@@ -1,6 +1,6 @@
 # REPO URL COPY THIS INTO DALAMUD
 
-`https://raw.githubusercontent.com/Yanami17/DM-helper/master/repo.json`
+`https://raw.githubusercontent.com/Yanami17/DM-helper/main/repo.json`
 
 
 
