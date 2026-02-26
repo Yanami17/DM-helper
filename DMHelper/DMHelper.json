@@ -1,9 +1,11 @@
 {
-  "Author": "Toyako",
-  "Name": "DM Helper Tool",
-  "Punchline": "Send help I'm trapped in a sweatshop dear god please",
-  "Description": "Encounter management tool for DMs.",
-  "InternalName": "DMHelper",
-  "ApplicableVersion": "any",
-  "Tags": [ "utility", "combat", "dm" ]
+    "Author": "Toyako",
+    "Name": "DM Helper Tool",
+    "Punchline": "Encounter management tool for DMs.",
+    "Description": "Send help I've been trapped in a sweatshop dear god please",
+    "InternalName": "DMHelper",
+    "AssemblyVersion": "1.0.0.0",
+    "ApplicableVersion": "any",
+    "DalamudApiLevel": 14,
+    "Tags": [ "utility", "combat", "dm" ]
 }
