@@ -2,7 +2,7 @@
 
 `https://raw.githubusercontent.com/Yanami17/DM-helper/main/repo.json`
 
-
+I will not fix this shit
 
 > ⚠️ **Don't click Fork!**
 > 
